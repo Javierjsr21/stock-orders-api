@@ -37,12 +37,14 @@ exports.updateProduct = asyncHandler(async (req, res) => {
   res.json(product);
 });
 
-exports.deleteProduct = asyncHandler(async (req, res) => {
-  const product = await Product.findById(req.params.id);
+// DELETE /api/products/:id
+const deleteProduct = asyncHandler(async (req, res) => {
+  const product = await Product.findByIdAndDelete(req.params.id);
+
   if (!product) {
     res.status(404);
-    throw new Error('Product not found');
+    throw new Error("Product not found");
   }
-  await product.remove();
-  res.json({ message: 'Product removed' });
+
+  res.json({ message: "Product removed" });
 });
