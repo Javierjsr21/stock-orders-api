@@ -99,18 +99,18 @@ POST /api/orders
 Authorization: Bearer tu_token_aqui
 Content-Type: application/json
 
-{
-  "items": [
-    {
-      "producto": "64a1b2c3d4e5f6789",
-      "cantidad": 2
-    },
-    {
-      "producto": "64a1b2c3d4e5f6790",
-      "cantidad": 1
-    }
-  ]
-}
+  {
+    "items": [
+      {
+        "producto": "64a1b2c3d4e5f6789",
+        "cantidad": 2
+      },
+      {
+        "producto": "64a1b2c3d4e5f6790",
+        "cantidad": 1
+      }
+    ]
+  }
 ```
 
 ### Obtener Mis Pedidos
@@ -119,7 +119,7 @@ GET /api/orders
 Authorization: Bearer tu_token_aqui
 ```
 
-### Obtener Pedido por ID
+<### Obtener Pedido por ID
 ```http
 GET /api/orders/64a1b2c3d4e5f6791
 Authorization: Bearer tu_token_aqui

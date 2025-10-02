@@ -3,109 +3,146 @@ const mongoose = require('mongoose');
 const Order = require('../models/Order');
 const Product = require('../models/Product');
 
-exports.createOrder = asyncHandler(async (req, res) => {
+
+const createOrder = asyncHandler(async (req, res) => {
+  const { items } = req.body;
+
+  if (!items || items.length === 0) {
+    res.status(400);
+    throw new Error("No items in the order");
+  }
+
+  let total = 0;
   const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const { items } = req.body;
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      res.status(400);
-      throw new Error('Order items required');
-    }
-    session.startTransaction();
-    const productIds = items.map(i => i.producto);
-    const products = await Product.find({ _id: { $in: productIds } }).session(session);
-    const productsMap = new Map(products.map(p => [p._id.toString(), p]));
-    let total = 0;
     const orderItems = [];
-    for (const it of items) {
-      const prod = productsMap.get(it.producto);
-      if (!prod) {
+
+    for (const item of items) {
+      if (!item.cantidad || item.cantidad <= 0) {
         await session.abortTransaction();
+        session.endSession();
         res.status(400);
-        throw new Error(`Product not found: ${it.producto}`);
+        throw new Error(
+          `Invalid quantity for product: ${item.producto}. Quantity must be greater than 0`
+        );
       }
-      if (prod.stock < it.cantidad) {
+
+      const product = await Product.findById(item.producto).session(session);
+      if (!product) {
         await session.abortTransaction();
-        res.status(400);
-        throw new Error(`Insufficient stock for product ${prod._id}`);
+        session.endSession();
+        res.status(404);
+        throw new Error(`Product not found: ${item.producto}`);
       }
-      const subtotal = prod.precio * it.cantidad;
-      total += subtotal;
-      orderItems.push({ producto: prod._id, cantidad: it.cantidad, precioUnitario: prod.precio, subtotal });
-      prod.stock -= it.cantidad;
-      await prod.save({ session });
+
+      if (product.stock < item.cantidad) {
+        await session.abortTransaction();
+        session.endSession();
+        res.status(400);
+        throw new Error(
+          `Insufficient stock for ${product.nombre}. Available: ${product.stock}`
+        );
+      }
+
+      product.stock -= item.cantidad;
+      await product.save({ session });
+
+      orderItems.push({
+        producto: product._id,
+        cantidad: item.cantidad,
+      });
+
+      total += product.precio * item.cantidad;
     }
-    const order = await Order.create([{
-      usuario: req.user.id,
+
+    const order = new Order({
+      usuario: req.user._id,
       items: orderItems,
       total,
-      estado: 'activo'
-    }], { session });
+    });
+
+    const createdOrder = await order.save({ session });
+
     await session.commitTransaction();
     session.endSession();
-    res.status(201).json(order[0]);
+
+    res.status(201).json(createdOrder);
   } catch (error) {
-    try { await session.abortTransaction(); } catch (e) {}
+    await session.abortTransaction();
     session.endSession();
     throw error;
   }
 });
 
-exports.getOrders = asyncHandler(async (req, res) => {
-  const filter = {};
-  if (req.user.role !== 'admin') filter.usuario = req.user.id;
-  const orders = await Order.find(filter).populate('usuario', 'name email').populate('items.producto');
+
+const getOrders = asyncHandler(async (req, res) => {
+  const orders =
+    req.user.role === 'admin'
+      ? await Order.find().populate('usuario', 'name email')
+      : await Order.find({ usuario: req.user._id });
+
   res.json(orders);
 });
 
-exports.getOrderById = asyncHandler(async (req, res) => {
-  const order = await Order.findById(req.params.id).populate('usuario', 'name email').populate('items.producto');
+
+const getOrderById = asyncHandler(async (req, res) => {
+  const order = await Order.findById(req.params.id)
+    .populate('usuario', 'name email')
+    .populate('items.producto', 'nombre precio');
+
   if (!order) {
     res.status(404);
     throw new Error('Order not found');
   }
-  if (req.user.role !== 'admin' && order.usuario._id.toString() !== req.user.id) {
-    res.status(403);
-    throw new Error('Not authorized to view this order');
-  }
+
   res.json(order);
 });
 
-exports.cancelOrder = asyncHandler(async (req, res) => {
+
+const cancelOrder = asyncHandler(async (req, res) => {
+  const order = await Order.findById(req.params.id).populate('items.producto');
+
+  if (!order) {
+    res.status(404);
+    throw new Error('Order not found');
+  }
+
+  if (order.estado === 'cancelado') {
+    res.status(400);
+    throw new Error('Order is already cancelled');
+  }
+
   const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    session.startTransaction();
-    const order = await Order.findById(req.params.id).session(session);
-    if (!order) {
-      await session.abortTransaction();
-      res.status(404);
-      throw new Error('Order not found');
-    }
-    if (order.estado === 'cancelado') {
-      await session.abortTransaction();
-      res.status(400);
-      throw new Error('Order already cancelled');
-    }
-    if (req.user.role !== 'admin' && order.usuario.toString() !== req.user.id) {
-      await session.abortTransaction();
-      res.status(403);
-      throw new Error('Not authorized to cancel this order');
-    }
-    for (const it of order.items) {
-      const prod = await Product.findById(it.producto).session(session);
-      if (prod) {
-        prod.stock += it.cantidad;
-        await prod.save({ session });
+    for (const item of order.items) {
+      const product = await Product.findById(item.producto._id).session(session);
+      if (product) {
+        product.stock += item.cantidad;
+        await product.save({ session });
       }
     }
+
     order.estado = 'cancelado';
     await order.save({ session });
+
     await session.commitTransaction();
     session.endSession();
+
     res.json({ message: 'Order cancelled', order });
   } catch (error) {
-    try { await session.abortTransaction(); } catch (e) {}
+    await session.abortTransaction();
     session.endSession();
     throw error;
   }
 });
+
+module.exports = {
+  createOrder,
+  getOrders,
+  getOrderById,
+  cancelOrder,
+};
