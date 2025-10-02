@@ -52,6 +52,8 @@ const createOrder = asyncHandler(async (req, res) => {
       orderItems.push({
         producto: product._id,
         cantidad: item.cantidad,
+         precioUnitario: product.precio,                  
+        subtotal: product.precio * item.cantidad   
       });
 
       total += product.precio * item.cantidad;
